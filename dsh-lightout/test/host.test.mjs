@@ -249,7 +249,7 @@ async function waitUntil(predicate, timeoutMs) {
 
 /**
  * 在 `from` 之后、`to` 之前取一段原文（脚本静态断言用）：用来把断言**定位到具体分支**，
- * 避免"有界正则被后面别的分支误命中"（有界正则被后文误命中时就会漏掉）。找不到返回 ''。
+ * 避免"有界正则被后面别的分支误命中"（t8 的反证就是这么漏掉的）。找不到返回 ''。
  */
 function sliceBetween(text, from, to) {
   const start = text.indexOf(from)
@@ -424,7 +424,7 @@ let handler = null
   assert.equal(markerLines().includes('hold:dark'), false, 'VDD 没就绪时**不得**起守卫')
   assert.equal(fs.existsSync(HOLD_STATE_DISABLED), false)
 
-  // 去重只在**提权进程还在跑**时成立：桩用 LIGHTOUT_TEST_VDD_HOLD_MS 保持存活，
+  // 去重只在**提权进程还在跑**时成立（t8 必修 3）：桩用 LIGHTOUT_TEST_VDD_HOLD_MS 保持存活，
   // 所以这个开关必须在第一次请求之前就设好。
   process.env.LIGHTOUT_TEST_VDD_HOLD_MS = '4000'
   try {
@@ -514,7 +514,7 @@ let handler = null
 }
 
 // ── 8) 并发：同一时刻的两个 /off 只能起一个守卫（钉住「busy 最前置」）──────────────
-// 若 busy 在 probeVdd（数秒级 PowerShell）**之后**才置 ⇒ 两个请求都会通过检查、
+// 0.3.0 的写法在 probeVdd（数秒级 PowerShell）**之后**才置 busy ⇒ 两个请求都通过检查、
 // 各起一个守卫，这正是一次事故的核心。这条用例就是它的回归钉：把 busy 挪到任何一个
 // await 之后，它必须变红。
 {
@@ -691,7 +691,7 @@ let handler = null
     assert.equal(
       markerLines().filter((line) => line === 'topology:restore').length,
       1,
-      '失败之后必须在退避窗口内停手（曾按 300 ms 一次 = 每秒两个 PowerShell），实际：' + JSON.stringify(markerLines()),
+      '失败之后必须在退避窗口内停手（旧写法是 300 ms 一次 = 每秒两个 PowerShell），实际：' + JSON.stringify(markerLines()),
     )
     assert.ok(restoresAreAtomic(markerLines()), '失败路径同样不许重叠：' + JSON.stringify(markerLines()))
     assert.equal(fs.existsSync(HOLD_STATE_RETRY), true, '还原没成功 ⇒ 回执留着交给下一次（也是 /status 告警的来源）')
@@ -708,7 +708,7 @@ let handler = null
       '显式 refresh（用户回来了）必须立刻重试，不等退避窗口，实际：' + JSON.stringify(markerLines()),
     )
 
-    // 第三步：kick 正好撞在**在飞的 tick** 上 ⇒ 必须排队、出闸后补跑一次。
+    // 第三步：kick 正好撞在**在飞的 tick** 上 ⇒ 必须排队、出闸后补跑一次（t8 必修 2）。
     // 判据：这次 mount 的 restoreRetryMs=60 s，所以窗口内**定时器不会**再起还原；能出现第二次
     // restore:failed 就只能是"被挡下的 kick 补跑了"。
     resetMarker()
@@ -734,7 +734,7 @@ let handler = null
 }
 
 // ── 13) 上一次的还原还没完成时，/off 必须接管工作单，不许清回执也不许起新守卫 ──────────
-// 先删掉唯一的工作单、再起一个全新的 8 小时守卫 ⇒ 用户在黑屏里盲点一下又是一轮长暗窗。
+// 旧行为：先删掉唯一的工作单、再起一个全新的 8 小时守卫 ⇒ 用户在黑屏里盲点一下又是一轮长暗窗（t8 必修 4）。
 {
   const pending = mount({
     scripts: { vdd: fixture('vdd-enabled.ps1'), hold: fixture('hold-stub.ps1'), topology: fixture('topology-stub.ps1') },
@@ -753,7 +753,7 @@ let handler = null
   assert.equal(markerLines().filter((line) => line.startsWith('hold:dark')).length, 0, '不得起新守卫')
   assert.equal(fs.existsSync(HOLD_STATE_PENDING), true, '工作单必须留着（看门狗靠它收尾）')
   assert.equal(JSON.parse(fs.readFileSync(HOLD_STATE_PENDING, 'utf8').replace(/^\uFEFF/, '')).restoreFailed, true)
-  // 回执形状要和其它 /off 分支一致
+  // 回执形状要和其它 /off 分支一致（t8 必修 6③）
   for (const key of ['ok', 'action', 'mode', 'reason', 'error', 'needsVdd', 'hold', 'guardPid', 'vdd', 'plan', 'keepAwake', 'warning']) {
     assert.ok(key in off.json, '/off 回执必须始终含 ' + key + '，实际：' + Object.keys(off.json).join(','))
   }
@@ -820,7 +820,7 @@ let handler = null
   assert.equal(defaults.vddBaseline, '', '空串＝用 %TEMP%\\lightout-vdd-baseline.json')
   assert.equal(defaults.eventLog, '', '空串＝用 %TEMP%\\lightout-events.jsonl')
   assert.equal(defaults.restoreRetryMs, 20000, '看门狗失败重试：前几次 20 s')
-  assert.equal(defaults.restoreRetrySlowMs, 30000, '连续失败后的降级间隔（120 s 太久）')
+  assert.equal(defaults.restoreRetrySlowMs, 30000, '连续失败后的降级间隔（t8：120 s 太久）')
   assert.equal(defaults.vddDedupMs, 60000, '/vdd 同动作去重窗口')
   assert.equal(defaults.bodyMaxBytes, 8192, '/off 的 body 上限（busy 覆盖读取，不能没有上限）')
   assert.equal(defaults.psExe, '', '空串＝用 powershell.exe')
@@ -969,7 +969,7 @@ let handler = null
   )
   assert.match(hold, /\$RestoreSeconds/, '还原重试必须有独立的小窗口参数')
   assert.match(hold, /restoreFailed/, '放弃还原时必须把 restoreFailed 落盘，看门狗才知道要接手')
-  // 跨层覆盖缺口（反证：删掉终局那次落盘，整套宿主用例仍会全绿）——这里补**定位到分支**的
+  // 跨层覆盖缺口（t8 的反证：删掉终局那次落盘，整套宿主用例仍会全绿）——这里补**定位到分支**的
   // 断言：`$result.ok = $restored` 之后、该动作的 Emit-Result 之前必须有 Save-HoldReceipt。
   // （有界正则/按括号取块都会被后面别的分支误命中——前两版就是这么漏掉反证的。）
   const darkTail = sliceBetween(hold, '$result.ok = $restored', 'Emit-Result $result')
@@ -1256,6 +1256,42 @@ let handler = null
   assert.match(client, /function envCheckLabel\(/, '客户端必须把体检来源翻成人话（tooltip）')
   assert.match(client, /check\.trigger === 'mount'/, '挂载期那一档要有自己的文案')
   console.log('  静态契约  ok  挂载预热 + effect 生命周期 + dryRun 短路 + 客户端文案')
+}
+
+// ── 19) 行为：拿不到 webServer 必须出声，服务到位/dryRun 都不许出声 ──────────
+{
+  const warns = []
+  const probeDisposers = []
+  const probeCtx = (inject) => ({
+    logger: { info() {}, warn(...a) { warns.push(a.map(String).join(' ')) } },
+    effect(fn) { const off = fn(); if (typeof off === 'function') probeDisposers.push(off); return off },
+    inject,
+    get() { return undefined },
+  })
+  const hits = () => warns.filter((w) => w.includes('webServer')).length
+
+  // A) 宿主始终不交 webServer（cordis 的等待型 inject 就是不回调）⇒ 到点必须 warn 一次
+  warns.length = 0
+  apply(probeCtx(() => {}), { routeProbeMs: 30, dryRun: false })
+  await sleep(80)
+  assert.equal(hits(), 1, '拿不到 webServer 必须 warn 一条（这就是这条诊断存在的理由），实际：' + JSON.stringify(warns))
+
+  // B) 宿主交了 webServer（fakeContext 的 inject 立刻回调）⇒ 不许 warn（假警会让人不再信这条日志）
+  warns.length = 0
+  const goodCtx = fakeContext({ register() { return () => {} } })
+  goodCtx.logger = { info() {}, warn(...a) { warns.push(a.map(String).join(' ')) } }
+  apply(goodCtx, { routeProbeMs: 30, dryRun: false })
+  await sleep(80)
+  assert.equal(hits(), 0, '服务到位不得误报，实际：' + JSON.stringify(warns))
+
+  // C) dryRun ⇒ 连这条诊断也不起（挂载无副作用是既有契约）
+  warns.length = 0
+  apply(probeCtx(() => {}), { routeProbeMs: 30, dryRun: true })
+  await sleep(80)
+  assert.equal(hits(), 0, 'dryRun 下不得起诊断，实际：' + JSON.stringify(warns))
+
+  for (const off of probeDisposers) { try { off() } catch { /* 收尾失败不影响结论 */ } }
+  console.log('  服务诊断行为  ok  缺服务出声 1 次 / 服务到位 0 次 / dryRun 0 次')
 }
 
 for (const dispose of disposers) dispose()

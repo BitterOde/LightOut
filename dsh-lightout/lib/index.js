@@ -12,8 +12,8 @@
  *   本机只有 Modern Standby（无 S3）。`SC_MONITORPOWER` 关屏被记成 `Kernel-Power 566 原因
  *   SleepButton`，系统进 S0 待机会话、DAM 阶段挂起所有桌面应用 ⇒ DSH 连同进程树整体停摆
  *   （两次实测：缺口 94.5 s / 52 分钟）。所以熄屏改走「内置屏移出活动显示集」：面板物理断电、
- *   系统仍认为有屏、进程照跑。旧的「关屏广播」执行器已整条删除（**本仓库不再包含它，也没有回退开关**）；
- *   scripts/lightout.ps1 现在只剩**只读**的电源键策略报告，
+ *   系统仍认为有屏、进程照跑。旧的「关屏广播」执行器已整条删除（原文备份在
+ *   _research/legacy-backup-20260926/）；scripts/lightout.ps1 现在只剩**只读**的电源键策略报告，
  *   `/status` 的 machine 段用它（它必须便宜：每次未命中缓存都要跑一次）。
  *
  * 三层防线（缺一不可）：
@@ -51,7 +51,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const name = 'lightout'
-export const VERSION = '1.0.0'
+export const VERSION = '1.1.0'
 export const ROUTE_PATH = '/api/dsh-lightout'
 
 /** keep-awake 插件的状态路由（只在 loopback 上探；端口取自 webServer，见 keepAwakeBase）。 */
@@ -107,12 +107,21 @@ const DEFAULTS = {
   /**
    * 连续失败超过 RESTORE_RETRY_FAST_TRIES 次之后的退避（毫秒）。30 s 是有意的折中：
    * 这一档生效时面板很可能还黑着，用户解锁回来要是还得等两分钟才等到下一次重试，
-   * 体验上就等于"没在重试"（客户端 focus/visibility 的 kick 是另一条更快的路）。
+   * 体验上就等于"没在重试"（t8 判定 120 s 太久；客户端 focus/visibility 的 kick 是另一条更快的路）。
    */
   restoreRetrySlowMs: 30000,
   // ── 通用 ──────────────────────────────────────────────────────────────────────────
   /** 体检结果缓存时长（毫秒），避免浏览器每次轮询都起 PowerShell。 */
   statusCacheMs: 15000,
+  /**
+   * 挂载后等多久检查"宿主是否交了 webServer 服务"（毫秒）。拿不到就 warn 一条，`0` ＝ 不检查。
+   *
+   * 为什么需要：`ctx.inject` 在服务缺席时只是让子 fiber 悬置 —— 插件照常挂载、不抛、不报错，
+   * 而四条路由一条也没注册。外部最典型的成因是**宿主版本与插件不匹配**（旧版没有这个服务名），
+   * 表现是"装上了、dump-config 里也有，但所有请求 404、界面点了没反应"。诊断只报告事实，
+   * 不改行为：拿不到服务时插件本来就什么都不做，这里只是让它出声。
+   */
+  routeProbeMs: 10000,
   /** 单次 PowerShell 调用的超时（毫秒）。 */
   helperTimeoutMs: 20000,
   /** 是否探测 keep-awake 插件状态。 */
@@ -135,7 +144,7 @@ const DEFAULTS = {
   psExe: '',
   /**
    * 守卫/提权进程的 stdout+stderr 落盘（滚动）。空串＝%TEMP%\lightout-guard.log。
-   * 为什么必须落盘：`stdio:'ignore'` 会把"为什么没起来"一起丢掉（界面分不清
+   * 为什么必须落盘：`stdio:'ignore'` 会把"为什么没起来"一起丢掉（t8 指出界面分不清
    * guard-already-running / guard-lock-unavailable / guard-exited 三种原因）。
    */
   guardLog: '',
@@ -483,7 +492,7 @@ function spawnHidden(file, args, exe = PS_EXE, logFile = '') {
   let failure = null
   let exitCode = null
   // stdout/stderr 重定向到滚动日志：`stdio:'ignore'` 会把"为什么没起来"（已锁/已有守卫/崩溃）
-  // 一起丢掉（覆盖缺口）。没有 logFile 时保持原来的 ignore。
+  // 一起丢掉（t8 的覆盖缺口）。没有 logFile 时保持原来的 ignore。
   const stdio = ['ignore', 'ignore', 'ignore']
   let logFd = null
   if (typeof logFile === 'string' && logFile.length > 0) {
@@ -554,7 +563,7 @@ function readHoldState(options) {
   const maxSeconds = typeof parsed.maxSeconds === 'number' ? parsed.maxSeconds : null
   // 回执自带的到期时刻：守卫到点会自己退出，所以过了期的回执不再能代表"还黑着"。
   // 没有这一条，一个 pid 恰好被复用给别的进程的陈旧回执会让面板永远不还原、/off 永远 409，
-  // 而且 /on 会去杀那个无关进程。
+  // 而且 /on 会去杀那个无关进程（2026-09-26 审计 F8）。
   const startedMs = parseLocalSeconds(startedAt)
   const deadlineMs = parseLocalSeconds(deadline)
   const expiresAt =
@@ -646,7 +655,7 @@ async function probeVdd(options) {
       gpuCount: Number.isFinite(Number(values.gpuCount)) ? Number(values.gpuCount) : 0,
       gpuChanged: values.gpuChanged === 'True',
       vddChanged: values.vddChanged === 'True',
-      // managed 实例的选择结果（vdd-device.ps1 的 RESULT 里一直有）：
+      // managed 实例的选择结果（vdd-device.ps1 的 RESULT 里一直有，t8 指出宿主没往上报）：
       // choice=managed 正常；ambiguous ＝ 多张候选选不出；missing/none ＝ 找不到设备。
       deviceChoice: typeof values.deviceChoice === 'string' ? values.deviceChoice : null,
       deviceCount: Number.isFinite(Number(values.deviceCount)) ? Number(values.deviceCount) : null,
@@ -804,6 +813,11 @@ export function apply(ctx, config = {}) {
     statusProbeStartedAt: 0,
     /** 挂载期预热体检起过没有（dryRun 下不起，/status.envCheck.warmedAtMount 如实报它）。 */
     mountWarmup: { started: false },
+    /**
+     * 宿主服务到没到（只用于诊断，不参与行为）。`ctx.inject` 服务缺席时静默，这正是
+     * "装上却什么都不发生"最难查的地方，所以挂载后按 `routeProbeMs` 检查一次并出声。
+     */
+    platformProbe: { webServer: false, warned: false },
     busy: false,
     guard: null,
     /** 熄屏/还原的意图序号：/on 会作废在飞的 /off（见 /off 的意图复核）。 */
@@ -888,7 +902,7 @@ export function apply(ctx, config = {}) {
   /**
    * /on 允许删掉哪些回执：**只删自己杀掉的那个 pid 的**，或者一个没有主（pid 为空 / pid 已死）
    * 的陈旧回执。别人的活守卫回执必须留下——删了它看门狗就失明（它只认回执），界面也会丢掉
-   * 「结束熄屏」、再点只拿到 409。
+   * 「结束熄屏」、再点只拿到 409（2026-09-26 审计 F2）。
    * `restoreFailed` 的回执一律留下：那是看门狗的工作单。
    */
   function shouldClearReceipt(hold, killedPid) {
@@ -907,7 +921,7 @@ export function apply(ctx, config = {}) {
 
   /**
    * `/off` 的**统一回执形状**：无论成功、busy 冲突、被取代还是失败，键集合都一样
-   * （用不到的给 null），客户端只认一种形状（此前 busy-409 只有 `{error}`）。
+   * （用不到的给 null），客户端只认一种形状（t8 必修 6③：此前 busy-409 只有 `{error}`）。
    */
   function offPayload(extra) {
     return {
@@ -943,7 +957,7 @@ export function apply(ctx, config = {}) {
   async function watchdogTick(kick) {
     // 重入闸：tick 不重叠（慢还原一次 3–6 s，窗口 20 s，不设闸会叠出十几路并发）。
     // **重入时把 kick 排队**：kick 是一次性的（用户点「结束熄屏」/ 界面回到前台），被丢掉就再也不会重来
-    // ——用户显式刷新可能正好撞在在飞的 tick 上而失效。定时器 tick 不排队（下一次自己会来）。
+    // ——t8 指出"用户显式刷新有约 1/4 概率正好撞在在飞 tick 上而失效"。定时器 tick 不排队（下一次自己会来）。
     if (state.ticking) {
       if (kick === true) state.kickPending = true
       return
@@ -965,7 +979,7 @@ export function apply(ctx, config = {}) {
           state.restoreRetry = { nextAt: 0, attempts: 0 }
         } else {
           // restore 是**动作**不是查询：它跑起来就算数，输出解析失败不该被当成"没还原"
-          // （用 text 契约解析它的输出，一个不含 key=value 的回执就会被判失败，
+          // （旧写法用 runScriptText 解析它的输出，一个不含 key=value 的回执就会被判失败，
           // 然后白等一个退避窗口）。所以：执行 → 再 check 一次确认结果。
           const out = await execScript(scriptPath(options, 'topology'), ['-Action', 'restore'], options.helperTimeoutMs, psExe).catch((error) => ({
             text: String(error?.message ?? error),
@@ -1145,6 +1159,35 @@ export function apply(ctx, config = {}) {
   }, 'dsh-lightout: mount-warmup')
 
   /**
+   * **到点检查宿主服务是否真的到了**（只报告，不改行为）。
+   *
+   * `ctx.inject(['webServer'], …)` 在服务缺席时**静默**：插件照常挂载、不抛，而下面的路由一条也没注册。
+   * 外部最典型的成因是宿主版本与插件不匹配（旧版没有这个服务名），表现是"装上了、
+   * `--dump-config` 里也有那一行，但所有请求 404、界面点了没反应"——不说出来就没法查。
+   *
+   * 三条纪律与预热一致：不 await、dryRun 下不起（测试的挂载无副作用契约）、用 effect 挂
+   * （卸载时把定时器收掉，不留没人认领的回调）。去重由 `state.platformProbe.warned` 完成：
+   * 定时器每个实例只起一次，服务晚到时 inject 回调会把 `webServer` 标上、自然不再 warn。
+   */
+  ctx.effect(() => {
+    if (options.dryRun || !(options.routeProbeMs > 0)) return undefined
+    const timer = setTimeout(() => {
+      if (state.platformProbe.webServer || state.platformProbe.warned) return
+      state.platformProbe.warned = true
+      if (ctx.logger) {
+        ctx.logger.warn(
+          'lightout: 宿主未提供 webServer 服务（等了 %d ms），%s 下的路由未注册 —— ' +
+            '插件仍会挂载，但所有请求会 404；宿主版本可能与本插件不匹配（实测环境 dsh 0.1.5-rc.3）',
+          options.routeProbeMs,
+          ROUTE_PATH,
+        )
+      }
+    }, options.routeProbeMs)
+    if (typeof timer.unref === 'function') timer.unref()
+    return () => clearTimeout(timer)
+  }, 'dsh-lightout: route-service-probe')
+
+  /**
    * @param webServer - 由 `ctx.inject(['webServer'], …)` 交出来的服务实例；端口在**每次请求时**读，
    *   拿到的是 listen 之后的真实端口（配置成 0 时也一样）。
    */
@@ -1184,7 +1227,7 @@ export function apply(ctx, config = {}) {
         const elevation = readElevateLog(options)
         const vdd = machineState?.vdd ?? null
         // 唤醒锁、VDD、以及「面板还没还原回来」这三类判据**只在宿主算一次**，客户端照抄
-        // `warnings`（两边各写一份必然漂移）。
+        // `warnings`（两边各写一份必然漂移，2026-09-26 审计 D9/D10）。
         const warnings = []
         if (vdd?.available === false) warnings.push('探不到虚拟显示器执行器：' + String(vdd.error ?? '未知原因'))
         else if (vdd?.present === false) warnings.push('虚拟显示器驱动未安装（scripts/vdd-device.ps1 报 device=none）')
@@ -1194,7 +1237,7 @@ export function apply(ctx, config = {}) {
           warnings.push('keep-awake 未持有系统唤醒锁：暗窗期间机器可能进入睡眠，DSH 会停摆')
         }
         // managed 设备实例：脚本侧把 `ROOT\DISPLAY\0000` 写死为默认，这里把它显式化并报出偏差
-        // （宿主此前没往上报 deviceChoice/deviceCount，多实例是静默的）。
+        // （t8 指出宿主从没往上报 deviceChoice/deviceCount，多实例是静默的）。
         if (vdd?.available === true && vdd.present === true) {
           const want = options.vddInstance
           if (want.length > 0 && typeof vdd.device === 'string' && vdd.device.toUpperCase() !== want.toUpperCase()) {
@@ -1268,17 +1311,17 @@ export function apply(ctx, config = {}) {
       }
 
       if (req.method === 'POST' && sub === '/off') {
-        // busy 必须在**这一刻**置位：下面每一次 await 都是数秒级的 PowerShell 调用，若延迟置位
+        // busy 必须在**这一刻**置位：下面每一次 await 都是数秒级的 PowerShell 调用，旧代码
         // 等它们跑完才置位，于是并发到达的 /off（提权轮询堆积时真的会发出来）全部通过了
         // 检查、各起一个守卫 —— 多个守卫同时切拓扑、又在唤醒时抢着还原，屏幕反复黑、
         // PowerShell 反复编译把 CPU 打满（2026-09-26 事故）。整个分支都在这个 busy 位里。
         if (state.busy) {
-          // busy 冲突也走同一个回执形状。
+          // busy 冲突也走同一个回执形状（t8 必修 6③）。
           return sendJson(res, 409, offPayload({ reason: 'busy', error: '已有一次熄屏正在进行' }))
         }
         state.busy = true
         // 意图序号：/on 会推高它。下面等了好几秒（probeVdd），spawn 之前要复核这个号还在不在，
-        // 否则"用户刚点「结束熄屏」，屏幕又黑回去"。
+        // 否则"用户刚点「结束熄屏」，屏幕又黑回去"（2026-09-26 审计 F2）。
         const myIntent = bumpIntent('off')
         let vdd = null
         let plan = null
@@ -1292,14 +1335,14 @@ export function apply(ctx, config = {}) {
         /**
          * /off 的**统一回执形状**：ok/action/mode/reason/error/needsVdd/hold/guardPid/vdd/plan/
          * keepAwake/warning 永远在场（用不到的给 null）。此前 busy-409 用 `{error}`、其它用完整载荷，
-         * 客户端要按两种形状判读。
+         * 客户端要按两种形状判读（t8 必修 6③）。
          */
         const reply = (status, extra, entry) => finish(status, offPayload({ vdd, plan, keepAwake, warning, ...extra }), entry)
         try {
           const liveHold = readHoldState(options)
           // 上一次的还原还没完成（面板可能还黑着）：**接管那张工作单**，不清回执、也不起新守卫。
           // 旧行为会先删掉唯一的工作单、再起一个全新的 8 小时守卫 ⇒ 用户在黑屏里盲点一下又是一轮长暗窗
-          // 。这里让看门狗立刻接手，并把原因如实回给界面。
+          // （t8 必修 4）。这里让看门狗立刻接手，并把原因如实回给界面。
           if (liveHold.present === true && liveHold.restoreFailed === true) {
             kickWatchdog('off-with-pending-restore')
             return reply(
@@ -1327,7 +1370,7 @@ export function apply(ctx, config = {}) {
               { ok: false, reason: 'already-running', guardPid },
             )
           }
-          // body 只是被吃掉，但读取必须有上限：
+          // body 只是被吃掉（`lock` 那条旧路线已随 legacy 一起删除），但读取有上限：
           // busy 覆盖这一段，不能让一个不结束的请求把 busy 顶住。
           await readJsonBody(req, options.bodyMaxBytes)
 
@@ -1448,7 +1491,7 @@ export function apply(ctx, config = {}) {
         if (guard.pid === null) {
           // spawn 失败 ＝ 守卫根本没起来：**绝不能**落进"pending 就算成功"那条分支
           // （那正是 2026-09-26 审计的"假成功回执"：200 + ok:true，屏幕却没黑）。
-          // 'error' 事件是**下一个 tick** 才到的：等一拍再读，否则详情永远只会写"未知原因"。
+          // 'error' 事件是**下一个 tick** 才到的：等一拍再读，否则详情永远只会写"未知原因"（t8 必修 6②）。
           await new Promise((resolve) => setImmediate(resolve))
           const failure = guard.failure()
           const detail = String(failure?.code ?? failure?.message ?? failure ?? '未知原因')
@@ -1500,7 +1543,7 @@ export function apply(ctx, config = {}) {
         if (hold.guardGone === true) {
           // 退出码分流（lightout-hold.ps1 的契约）：3 ＝ 单实例锁被占（已有守卫 / 锁不可用）、
           // 4 ＝ 切黑后崩溃（应已留下失败回执）、2 ＝ 动作非法；stdout/stderr 都在 guardLog 里。
-          // 这三件事以前在界面上完全分不出来，只会显示一句"守卫启动后立刻退出"。
+          // 这三件事以前在界面上完全分不出来，只会显示一句"守卫启动后立刻退出"（t8 必修 6①、台账 §一.9）。
           const code = guard.exitCode()
           const why =
             code === 3
@@ -1580,7 +1623,7 @@ export function apply(ctx, config = {}) {
         if (options.dryRun) {
           return sendJson(res, 200, { ok: true, action: 'vdd', requested: wanted, dryRun: true, needsAdmin: true, wording, check })
         }
-        // 去重：**上一次的提权进程还在跑**才算"同一次请求"。只按时间窗去重会让
+        // 去重：**上一次的提权进程还在跑**才算"同一次请求"（t8 必修 3）。只按时间窗去重会让
         // "用户点了否、60 s 内又点授权"根本弹不出 UAC，界面还误报"已取消授权"。
         const previous = state.lastVdd
         const previousAlive = previous !== null && isPidAlive(previous.pid)
@@ -1651,6 +1694,7 @@ export function apply(ctx, config = {}) {
 
   // 等待型注入：webServer 到位（= listen 完成后）才注册路由，端口届时才是真值。
   ctx.inject(['webServer'], (webCtx) => {
+    state.platformProbe.webServer = true
     webCtx.effect(
       () =>
         webCtx.webServer.register({

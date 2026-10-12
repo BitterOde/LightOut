@@ -1,6 +1,6 @@
 {
   "name": "dsh-lightout",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "LightOut：一键熄屏（面板物理断电，暗窗期间会话不锁定、DSH 继续工作）；键鼠一动先还原拓扑再锁屏。",
   "type": "module",
   "main": "lib/index.js",

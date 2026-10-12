@@ -10,7 +10,7 @@
  *   4. 提权弹层的两个落点档：能送出栈（`createPortal` → `document.body`，控件是原生 `<button>`）
  *      与送不出去（退回行内，控件必须是 `div[role=button]`，结构上仍不嵌套）；
  *   5. 回到前台/页面可见 ⇒ 带 refresh 探一次（宿主 kickWatchdog 的通道）＋卸载摘监听；
- *   6. 提权链：点过「取消」之后旧链不得复活。
+ *   6. 提权链：点过「取消」之后旧链不得复活（t8 要求补的那条单测）。
  *
  * react / react-dom 从 web profile 的 node_modules 解析（与浏览器里跑的是同一份）。
  */
@@ -23,13 +23,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 // React 从哪来：浏览器里的 'react' 由 DSH 客户端运行时提供，磁盘上不一定有一份现成的包；
 // 而 profile 只要被重建（pnpm 严格布局），以前被提升到 profile 顶层的那份就会被剪掉。
 // 所以按锚点顺序找，第一个能同时解析 react 与 react-dom/server 的胜出：
-//   1) DSH_LIGHTOUT_REACT_FROM 指向的 package.json / 目录（用自己的 DSH 安装里那份）
+//   1) DSH_LIGHTOUT_REACT_FROM 指向的 package.json / 目录
 //   2) 本仓库的测试专用依赖 tools/testdeps（cd tools/testdeps && npm install 一次即可）
-// **有意不写任何绝对路径**：写死某台机器的 profile 位置，会让别人 clone 下来直接跑不起来。
+//   3) web profile 自身（react 恰好被提升到顶层时）
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ANCHORS = [
   process.env.DSH_LIGHTOUT_REACT_FROM,
   path.resolve(HERE, '..', '..', 'tools', 'testdeps', 'package.json'),
+  'C:/Users/huawei/.dsh/profiles/web/package.json',
 ].filter(Boolean)
 
 function resolveReact() {
@@ -223,6 +224,7 @@ function renderA(props) {
 function setStatus(mod, keepAwake, extra = {}) {
   mod.__shared.set({
     status: {
+      version: '0.3.3',
       keepAwake,
       machine: { policy: { PBUTTONACTION: { effective: 3 } } },
       last: null,
@@ -414,7 +416,7 @@ console.log('  提权弹层  ok  送出栈档用原生 button；退回行内档�
   console.log('  服务缺席  ok  不注册、不抛、页面照常')
 }
 
-// ── 6) 提权链：点过「取消」之后，旧链不得复活（回归单测）──────────────────────
+// ── 6) 提权链：点过「取消」之后，旧链不得复活（t8 要求的单测）──────────────────────
 // 做法：用受控 fetch 记录 /off 与 /vdd 的调用次数，真实跑完 3 s 的轮询间隔。
 {
   const originalFetch = globalThis.fetch

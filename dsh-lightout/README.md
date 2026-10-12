@@ -259,6 +259,7 @@ curl.exe -H "origin: http://127.0.0.1:3080" -X POST http://127.0.0.1:3080/api/ds
 | `bodyMaxBytes` | `8192` | `/off` 的请求体上限（busy 位覆盖 body 读取，不能没有上限） |
 | `vddDedupMs` | `60000` | `/vdd` 同动作去重窗口 |
 | `vddInstance` | `ROOT\DISPLAY\0000` | 期望的 VDD managed 设备实例；与 verify 报回来的实例比对，不一致/多实例/选不出都进 `warnings`（空串＝不检查） |
+| `routeProbeMs` | `10000` | 挂载后等多久检查"宿主是否交了 `webServer` 服务"；拿不到就 `logger.warn` 一条（`0` ＝ 不检查）。用于定位"装上了但所有请求 404"这类版本不匹配 |
 | `statusCacheMs` / `helperTimeoutMs` / `probeKeepAwake` / `dryRun` | 见 `lib/index.js` 的 `DEFAULTS` | 通用 |
 | `scripts.{machine,topology,hold,vdd}` | `""` | 脚本路径覆盖（**测试用桩**；空串＝包内 `scripts/`） |
 | `psExe` | `""` | PowerShell 可执行文件覆盖（**测试用桩**：用来演练"spawn 失败"这条错误路径） |
