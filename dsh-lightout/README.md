@@ -485,7 +485,7 @@ const off = gui.register(
 
 | 依赖 | 必需？ | 缺失时 |
 |---|---|---|
-| **DSH**（`@deepseek-ai/dsh`） | 必需 | 插件的宿主 |
+| **DSH**（`@deepseek-ai/dsh`） | 必需 | 插件的宿主。**未声明版本要求**，实测环境是 `0.1.5-rc.3`；换版本前先看根 README 的「兼容性」一节，那里有自查命令 |
 | **Windows 10/11 + PowerShell 5.1** | 必需 | `scripts/` 下全是 PowerShell 执行器 |
 | **虚拟显示器驱动**（`VirtualDrivers.Virtual-Display-Driver`） | 熄屏功能必需 | 设备没装 ⇒ 熄屏不可用，其余体检功能照常 |
 | **GUIFrame**（自研，**尚未公开**） | 可选增强 | 插件照常挂载、四条路由照常，**但界面入口不出现**（只能走 HTTP 触发） |

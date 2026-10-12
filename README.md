@@ -122,6 +122,41 @@ cd dsh-lightout; npm test
 | `tools/dsh-web-supervisor.ps1` | 通用（按端口判活、按 `npm root -g` 找 dsh 入口） |
 | `tools/install-*.ps1` | 通用（路径均可参数化；默认值来自环境变量而非硬编码盘符） |
 
+## 兼容性（DSH 版本）
+
+**本插件没有声明 DSH 版本要求，也没有做版本检查**——所以下面这些是"实测事实 + 自查方法"，不是"支持矩阵"。
+
+| 项 | 值 |
+|---|---|
+| 开发与实测环境 | `@deepseek-ai/dsh` **0.1.5-rc.3**（`npm i -g @deepseek-ai/dsh` 装的那份） |
+| 插件声明的版本约束 | **无**（`package.json` 里没有 `peerDependencies` / `engines`） |
+| 其它 DSH 版本 | 未测试。平台 API 在 DSH 迭代中会变，**不保证可用** |
+
+它实际用到的平台能力只有这几样（对照你的 DSH 版本自查）：
+
+| 能力 | 用在哪 | 缺了会怎样 |
+|---|---|---|
+| 宿主服务 `webServer` | 注册四条 `/api/dsh-lightout/*` 路由 | **插件照常挂载，但所有路由 404、界面按钮点了没反应**（最危险的形态：不报错） |
+| 宿主服务 `safelyQuit` | DSH 关闭时发令禁用虚拟屏 | 少这块能力，其余照常（可选） |
+| 客户端 `window.__ModuleLoader__.load({id, factory})` | 浏览器半的加载方式 | 界面不出现（可选） |
+| GUIFrame 服务 `gui-frame` | 侧栏那行按钮的落点 | 界面不出现，`curl` 仍可熄屏（可选，见「依赖」） |
+
+**自查（装完先跑这个）**：
+
+```powershell
+# 1) 你的 DSH 版本
+node -p "require(require('child_process').execSync('npm root -g').toString().trim() + '/@deepseek-ai/dsh/package.json').version"
+
+# 2) 插件挂上了没（没有输出/报 not found ⇒ 没挂上或挂错了层）
+node "$env:APPDATA\npm\node_modules\@deepseek-ai\dsh\lib\bin.js" --profile web --dump-config | Select-String -Pattern "lightout"
+
+# 3) 路由通不通（404 ⇒ webServer 服务没拿到，通常是版本不匹配）
+curl.exe http://127.0.0.1:3080/api/dsh-lightout/status
+```
+
+**排查"装上了但什么都没发生"**：先看 2) 有没有那行；有行但 3) 是 404，就是平台服务对不上——
+**插件不会为此报错**（拿不到 `webServer` 时它只是不注册路由）。此时去宿主日志找 `lightout:` 开头的行确认。
+
 ## 依赖
 
 ### 必需的
