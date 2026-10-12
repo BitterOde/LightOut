@@ -1,0 +1,1 @@
+{"name":"lightout-testdeps","private":true,"description":"Test-only React for dsh-lightout client.test.mjs. Not part of the plugin package: keeping it outside dsh-lightout/ avoids any chance of the DSH client bundler picking up a nested react.","license":"MIT","dependencies":{"react":"^19.3.0","react-dom":"^19.3.0"}}

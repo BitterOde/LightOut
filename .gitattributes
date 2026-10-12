@@ -1,0 +1,24 @@
+# Line endings are part of this project's contract, so they are pinned, not auto-detected.
+#
+# Why it matters here:
+#   * tools/install-lightout.ps1 rewrites <profile>\cordis.patch.yml "byte-safely" and
+#     documents that it preserves the file's original line endings (LF);
+#   * the .ps1 files are deliberately ASCII-only because Windows PowerShell 5.1 parses a
+#     BOM-less file as ANSI -- round-tripping them through a text tool mangles them.
+# A clone with autocrlf on would silently change every line ending and break both.
+* text=auto eol=lf
+
+# Windows scripts and the YAML they patch: LF, always.
+*.ps1   text eol=lf
+*.psd1  text eol=lf
+*.yml   text eol=lf
+*.mjs   text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+
+# Never touch these.
+*.png   binary
+*.ico   binary
+*.zip   binary

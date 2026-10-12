@@ -1,0 +1,55 @@
+# DSH 断网重试预算补丁（片段，未应用）
+#
+# 用途：把「模型调用遇到 TRANSPORT（断网）时的重试预算」从默认的约 15 秒
+#       拉到约 15 分钟，使 WlanSvc 重启 / 校园网抖动这类数十秒级断网
+#       不会打断夜间运行中的轮次。
+#
+# 位置：追加到 <profile>\cordis.patch.yml（Windows 上默认 %USERPROFILE%\.dsh\profiles\web\cordis.patch.yml）
+#       （该文件是顶层 YAML 数组，追加一个元素即可；改完需重启 dsh web）
+#
+# 两个必须知道的前提（都已核实）：
+#   1. 补丁语义是"按键浅替换"（cordis-plugin-include/lib/index.js:100
+#      `target[key] = value`），因此这里的 config 会整体替换 llm-deepseek 行的
+#      config。当前该行在组成树里没有任何 config（实测 --dump-config），所以安全；
+#      若将来 bundle 给该行加了 config，本片段需同步补齐那些键。
+#   2. 路由归属：模型 deepseek-v4-flash 走 provider `deepseek-official`，
+#      该路由由 @deepseek-ai/dsh-llm-deepseek 注册（lib/index.js:1840），
+#      重试执行器 dsh-llm-retry 已在 web profile 挂载。
+#
+# 默认值（不改就是这套）：mode=normal, maxRetries=5, maxDelayMs=10000,
+# retryableCodes=[EMPTY_RESPONSE, RATE_LIMIT, SERVER, TIMEOUT, TRANSPORT]
+#   ⇒ 退避序列 0.5/1/2/4/8 秒，合计仅约 15.5 秒；WlanSvc 重启（断网数十秒）
+#     会把预算耗尽，轮次以 TRANSPORT 失败告终。
+#
+# 保守版（本片段）：覆盖约 15 分钟（1+2+4+8+16+32 + 60×14 = 903 秒），
+# 只在真正可重试的 5 类错误上重试，认证/配额等永久错误仍会立即失败。
+
+- id: llm-deepseek
+  config:
+    retryPolicy:
+      mode: normal
+      maxRetries: 20
+      retryableCodes:
+        - EMPTY_RESPONSE
+        - RATE_LIMIT
+        - SERVER
+        - TIMEOUT
+        - TRANSPORT
+      backoff:
+        initialDelayMs: 1000
+        maxDelayMs: 60000
+        jitterRatio: 0.2
+
+# 激进版（可选替换上面的 retryPolicy 块）：无上限重试，只在成功/取消时停止。
+# 代价：认证失败、额度耗尽、非法请求这类永久错误也会一直重试（README 明示），
+#      无人值守的夜里可能整夜空转烧掉请求。
+#
+#      retryPolicy:
+#        mode: always
+#        backoff:
+#          initialDelayMs: 1000
+#          maxDelayMs: 60000
+#          jitterRatio: 0.2
+#
+# 应用后自检（<dsh> 换成你的 DSH 安装目录，通常是 %APPDATA%\npm\node_modules\@deepseek-ai\dsh）：
+#   node "<dsh>\lib\bin.js" --profile web --dump-config | Select-String -Pattern "retryPolicy" -Context 0,8

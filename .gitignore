@@ -1,0 +1,11 @@
+# --- dependencies -----------------------------------------------------------
+node_modules/
+
+# --- local runtime artefacts (never published) ------------------------------
+*.log
+*.bak-*
+*.tmp
+
+# Machine-specific settings: copy net-watchdog.config.example.psd1 to this name.
+# The real file holds your SSID / interface / probe targets, so it stays local.
+net-watchdog.config.psd1

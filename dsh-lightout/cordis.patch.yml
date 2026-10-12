@@ -1,0 +1,56 @@
+# dsh-lightout bundle patch：把插件行插入 web profile 的花名册。
+#
+# 本文件由 package.json 的 dsh.bundle.patch 声明，作为 profile **bundle 层**自动应用。
+# 走这一层（= 往 `dsh.profile.bundles` 里加一行）**必须重启 dsh web**：bundles 只在启动时读一次。
+# 想免重启，就把下面同一段 `- insert:` 直接写进 profile 的**用户层**
+# `~/.dsh/profiles/web/cordis.patch.yml`（该文件是 live 监视重载的）——
+# 这正是 tools/install-lightout.ps1 默认做的事。两条路**二选一**，同时用会让同一 id 被插两次。
+#
+# 名字的三层区分（核实结论 M6，别混）：
+#   - 行 id            `lightout`      ← 本文件的 `- id:`
+#   - 行 name          `dsh-lightout`  ← 本文件的 `name:`；**同时**是浏览器半
+#                                        `window.__ModuleLoader__.load({ id: 'dsh-lightout' })` 用的 id
+#                                        （loader 条目名 = 行 name，与包的 main 无关）
+#   - cordis 运行时名   `lightout`      ← lib/index.js 的 `export const name`，与上面两个都无关
+#
+# 宿主半（exports "."）跑在 dsh 宿主进程里：注册 /api/dsh-lightout 路由（只服务回环连接，
+# 改状态的请求还要求同源），真正的动作交给 scripts/ 下的执行器（纯 ASCII，可单独运行）：
+#   scripts/vdd-device.ps1       虚拟显示器设备按需启停（唯一提权入口，提权前必须先经界面确认）
+#   scripts/lightout-hold.ps1    熄屏守卫：持电源请求 → 切拓扑 → 先还原再锁屏
+#   scripts/lightout-topology.ps1 显示拓扑切换（内置屏/虚拟屏活动集）
+#   scripts/lightout.ps1         只读：报告电源键/合盖/睡眠键的当前策略（供 /status 显示「电源键=关机」）
+#                                —— 本脚本只读，不执行任何关屏动作
+# 浏览器半由 package.json 的 dsh.client 声明，随页面加载（exports "./client"）。
+#
+# 可选的 config（全部有默认值，列出便于按需覆盖；完整说明见 README）：
+#   maxDarkSeconds: 28800   # 暗窗绝对上限（秒）；到点守卫自己还原并锁屏
+#   darkPollMs: 200         # 守卫检测键鼠输入的轮询间隔
+#   stateFile: ''           # 守卫状态文件；空串 = %TEMP%\lightout-hold.json
+#   eventLog: ''            # 事件日志（JSONL，事故回放用）；空串 = %TEMP%\lightout-events.jsonl
+#   elevateLog: ''          # 提权结果落盘；空串 = %TEMP%\lightout-vdd-elevate.json
+#   vddBaseline: ''         # 版本基线；空串 = %TEMP%\lightout-vdd-baseline.json
+#   vddWatchdogMs: 5000     # 看门狗间隔（守卫死了但拓扑还黑着 ⇒ 立刻还原）；0 = 关闭
+#   darkReceiptMs: 8000     # 等守卫落状态文件的上限（决定 /off 多久返回回执）
+#   vddGate: true           # 熄屏前是否强制要求虚拟显示器设备已启用
+#   restoreRetryMs: 20000   # 守卫放弃还原后，看门狗前几次重试的间隔
+#   restoreRetrySlowMs: 120000  # 重试次数超限后的降级间隔（避免永久高频重试把 CPU 打满）
+#   statusCacheMs: 15000    # /api/dsh-lightout/status 体检结果缓存
+#   helperTimeoutMs: 20000  # 单次 PowerShell 调用超时
+#   probeKeepAwake: true    # 是否探测 keep-awake 插件是否持有系统唤醒锁
+#   bodyMaxBytes: 8192      # /off 请求体上限（超限返回 413）
+#   vddDedupMs: 60000       # /vdd 提权请求的去重窗口
+#   scripts: { machine, topology, hold, vdd }   # 脚本路径覆盖（测试用桩；空串 = 包内默认）
+#   psExe: ''               # powershell.exe 路径覆盖（测试用桩；空串 = 用 PATH 上的）
+#   dryRun: false           # 只演练不执行（不切拓扑、不起守卫、不提权，仍返回完整 JSON）
+#                           # ⚠ 演练开关**只在这一层 config 里生效**：请求体/查询串里传 dryRun
+#                           #   不会改变行为。临时演练的写法：
+#                           #     - id: lightout
+#                           #       name: 'dsh-lightout'
+#                           #       config:
+#                           #         dryRun: true
+#                           # 提示：这一行下面的 config 块会被安装器的 -Uninstall 一起删干净
+#                           #      （卸载后与安装前字节一致），所以放心照着 README 调参。
+
+- insert:
+    - id: lightout
+      name: 'dsh-lightout'
