@@ -14,7 +14,7 @@
 
 ## 解决方案-VDD
 
-**虚拟显示器**（Virtual Display Driver / MttVDD）取代物理屏幕实现熄屏：
+**虚拟显示器**（Virtual Display Driver / MttVDD）取代物理屏幕实现熄屏
 
 ## 原理
 
